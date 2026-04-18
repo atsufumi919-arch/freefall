@@ -3,26 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex, nofollow">
-    <title>物理基礎：黒板消し落とし V5</title>
+    <title>物理基礎：黒板消し落とし V7（グラフ・時間差モデル）</title>
     <style>
         body { font-family: 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; background: #eceff1; color: #333; margin: 0; padding: 20px; }
-        .container { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: fit-content; }
-        canvas { background: #fafafa; border-bottom: 4px solid #546e7a; border-radius: 4px; display: block; }
-        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; width: 600px; }
+        .container { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 640px; }
+        canvas { background: #fafafa; border: 1px solid #cfd8dc; border-radius: 4px; display: block; margin-bottom: 10px; }
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
         .control-group { display: flex; flex-direction: column; }
         label { font-size: 13px; font-weight: bold; margin-bottom: 5px; color: #455a64; }
         input { padding: 8px; border: 1px solid #cfd8dc; border-radius: 4px; }
         button { grid-column: span 2; padding: 12px; cursor: pointer; background: #2196f3; color: white; border: none; border-radius: 4px; font-size: 16px; font-weight: bold; transition: 0.3s; }
         button:hover { background: #1976d2; }
-        .result-box { grid-column: span 2; text-align: center; height: 30px; line-height: 30px; font-weight: bold; font-size: 18px; border-radius: 4px; margin-top: 10px; }
-        .status-info { grid-column: span 2; font-size: 12px; color: #666; background: #f5f5f5; padding: 10px; border-radius: 4px; border-left: 4px solid #2196f3; }
+        .result-box { grid-column: span 2; text-align: center; height: 30px; line-height: 30px; font-weight: bold; font-size: 18px; border-radius: 4px; }
+        .info { grid-column: span 2; font-size: 12px; color: #666; background: #f5f5f5; padding: 10px; border-radius: 4px; line-height: 1.5; }
     </style>
 </head>
 <body>
 
     <div class="container">
-        <h2 style="text-align:center; margin-top:0;">黒板消し落としシミュレーター</h2>
-        <canvas id="canvas" width="600" height="450"></canvas>
+        <h2 style="text-align:center; margin: 0 0 15px 0;">黒板消し落としシミュレーター</h2>
+        
+        <canvas id="simCanvas" width="600" height="300"></canvas>
+        <canvas id="graphCanvas" width="600" height="200"></canvas>
         
         <div class="controls">
             <div class="control-group">
@@ -34,16 +36,8 @@
                 <input type="number" id="personHeight" value="1.7" step="0.1">
             </div>
             <div class="control-group">
-                <label>①通り抜ける隙間の幅 (m)</label>
-                <input type="number" id="gapWidth" value="0.6" step="0.1">
-            </div>
-            <div class="control-group">
-                <label>②ドアを開ける速さ (m/s)</label>
-                <input type="number" id="doorSpeed" value="1.2" step="0.1">
-            </div>
-            <div class="control-group">
-                <label>③歩き出してドア下に到達する時間 (s)</label>
-                <input type="number" id="walkTime" value="0.5" step="0.05">
+                <label>ドア下までの到達時間 (s)</label>
+                <input type="number" id="reachTime" value="1.0" step="0.05">
             </div>
             <div class="control-group">
                 <label>重力加速度 (m/s²)</label>
@@ -51,139 +45,171 @@
             </div>
             <button onclick="startSimulation()">シミュレーション実行</button>
             <div id="status" class="result-box"></div>
-            <div class="status-info">
-                <strong>物理モデル：</strong>ドアが開いた瞬間に黒板消しは自由落下を開始します。ドアが「隙間の幅」まで開ききった後、指定された時間（③）で生徒が歩いて到達します。
+            <div class="info">
+                <strong>時間配分：</strong>入力した到達時間の80%は待機（ドアを開ける動作）、残りの20%でドア下まで移動します。<br>
+                <strong>グラフ：</strong>青＝黒板消しの高さ(m)、オレンジ＝人の移動距離(m)
             </div>
         </div>
     </div>
 
     <script>
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
+        const simCanvas = document.getElementById('simCanvas');
+        const sCtx = simCanvas.getContext('2d');
+        const graphCanvas = document.getElementById('graphCanvas');
+        const gCtx = graphCanvas.getContext('2d');
+        
         let animationId;
         let startTime;
         let isHit = false;
+        let history = [];
 
-        // 画像の設定
         const personImg = new Image();
-        personImg.src = 'person.png'; // Webサーバー上では相対パスで読み込まれます
+        personImg.src = 'person.png'; 
 
-        function draw(t, dH, pH, gapW, dSpeed, wTime, g, isRunning) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        function draw(t, dH, pH, rT, g, isRunning) {
+            // --- データ計算 ---
+            const waitTime = rT * 0.8;
+            const moveTime = rT * 0.2;
             
-            const scale = 180; 
-            const groundY = 400;
-            const doorX = 350; 
+            // 黒板消しの落下 (自由落下)
+            let eraserY_m = dH - 0.5 * g * Math.pow(t, 2);
+            if (eraserY_m < 0) eraserY_m = 0;
+
+            // 人の水平位置 (0.8rTまで待機、その後移動)
+            let personX_ratio = 0;
+            if (t > waitTime) {
+                personX_ratio = Math.min((t - waitTime) / moveTime, 1.0);
+            }
+
+            // 履歴の保存（グラフ用）
+            if (isRunning && t <= rT + 0.5) {
+                history.push({ t, eraserY: eraserY_m, personX: personX_ratio });
+            }
+
+            // --- アニメーション描画 ---
+            sCtx.clearRect(0, 0, simCanvas.width, simCanvas.height);
+            const scale = 120; // 1mあたりのピクセル
+            const groundY = 280;
+            const doorX = 400;
             const doorTopY = groundY - dH * scale;
-            const doorWidth = 150; 
-            
-            // 背景（壁と鴨居）
-            ctx.fillStyle = '#e0e0e0';
-            ctx.fillRect(doorX - 150, doorTopY, 150, dH * scale); 
-            ctx.fillStyle = '#8d6e63';
-            ctx.fillRect(doorX - 150, doorTopY - 10, 300, 10); 
 
-            // ドアの計算
-            let slideOffset = isRunning ? dSpeed * t * scale : 0;
-            const maxSlide = gapW * scale;
-            if (slideOffset > maxSlide) slideOffset = maxSlide;
-            const timeToOpen = gapW / dSpeed;
+            // 背景
+            sCtx.fillStyle = '#e0e0e0';
+            sCtx.fillRect(doorX - 150, doorTopY, 150, dH * scale);
+            sCtx.fillStyle = '#8d6e63';
+            sCtx.fillRect(doorX - 150, doorTopY - 10, 300, 10);
 
             // ドア
-            ctx.fillStyle = '#b0bec5';
-            ctx.fillRect(doorX + slideOffset, doorTopY, doorWidth, dH * scale);
-            ctx.fillStyle = '#78909c';
-            ctx.fillRect(doorX + slideOffset + 10, groundY - 1.0 * scale, 5, 50); // 取っ手
+            let slide = isRunning ? Math.min(t / 0.2, 1) * 80 : 0;
+            sCtx.fillStyle = '#b0bec5';
+            sCtx.fillRect(doorX + slide, doorTopY, 120, dH * scale);
 
             // 黒板消し
-            let eraserY = doorTopY;
-            if (isRunning) {
-                eraserY += 0.5 * g * Math.pow(t, 2) * scale;
-            }
-            if (eraserY > groundY - 10) eraserY = groundY - 10;
+            const eY = groundY - eraserY_m * scale;
+            sCtx.fillStyle = '#4e342e';
+            sCtx.fillRect(doorX - 10, eY - 12, 30, 12);
 
-            ctx.fillStyle = '#4e342e'; 
-            ctx.fillRect(doorX - 5, eraserY, 30, 12); 
-            ctx.fillStyle = '#d7ccc8'; 
-            ctx.fillRect(doorX - 5, eraserY + 8, 30, 4);
-
-            // 人の動き
+            // 人
             const startX = 100;
-            const targetX = doorX + 10;
-            let currentX = startX;
+            const targetX = doorX + 5;
+            const currentX = startX + (targetX - startX) * personX_ratio;
+            const pHeightPx = pH * scale;
 
-            if (isRunning && t > timeToOpen) {
-                const walkT = t - timeToOpen;
-                currentX = startX + (targetX - startX) * (walkT / wTime);
-                if (currentX > targetX) currentX = targetX;
-            }
-
-            const headRadius = 15;
-            const headY = groundY - pH * scale;
-            const headTop = headY - headRadius * 2;
-            const eraserBottom = eraserY + 12;
-
-            // 人の描画
             if (personImg.complete && personImg.naturalWidth !== 0) {
-                const imgWidth = 80;
-                const imgHeight = pH * scale + 30;
-                ctx.drawImage(personImg, currentX - imgWidth/2, groundY - imgHeight, imgWidth, imgHeight);
+                sCtx.save();
+                sCtx.translate(currentX, groundY - pHeightPx);
+                sCtx.scale(-1, 1);
+                sCtx.drawImage(personImg, -40, 0, 80, pHeightPx);
+                sCtx.restore();
             } else {
-                ctx.fillStyle = '#1976d2';
-                ctx.fillRect(currentX - 15, headY, 30, pH * scale);
-                ctx.fillStyle = '#ffccbc';
-                ctx.beginPath();
-                ctx.arc(currentX, headY - headRadius, headRadius, 0, Math.PI * 2);
-                ctx.fill();
+                sCtx.fillStyle = '#1976d2';
+                sCtx.fillRect(currentX - 15, groundY - pHeightPx, 30, pHeightPx);
             }
 
-            // 判定
+            // --- グラフ描画 ---
+            gCtx.clearRect(0, 0, graphCanvas.width, graphCanvas.height);
+            gCtx.strokeStyle = '#cfd8dc';
+            gCtx.beginPath();
+            gCtx.moveTo(40, 180); gCtx.lineTo(580, 180); // X軸
+            gCtx.moveTo(40, 20); gCtx.lineTo(40, 180);  // Y軸
+            gCtx.stroke();
+
+            if (history.length > 1) {
+                const gScaleX = 500 / Math.max(rT + 0.5, 2);
+                const gScaleY = 140 / Math.max(dH, 2);
+
+                // 黒板消しライン
+                gCtx.strokeStyle = '#2196f3';
+                gCtx.lineWidth = 2;
+                gCtx.beginPath();
+                history.forEach((pt, i) => {
+                    const x = 40 + pt.t * gScaleX;
+                    const y = 180 - pt.eraserY * gScaleY;
+                    if (i === 0) gCtx.moveTo(x, y); else gCtx.lineTo(x, y);
+                });
+                gCtx.stroke();
+
+                // 人のライン
+                gCtx.strokeStyle = '#ff9800';
+                gCtx.beginPath();
+                history.forEach((pt, i) => {
+                    const x = 40 + pt.t * gScaleX;
+                    const y = 180 - (pt.personX * dH) * gScaleY; // 比率を高さに換算して表示
+                    if (i === 0) gCtx.moveTo(x, y); else gCtx.lineTo(x, y);
+                });
+                gCtx.stroke();
+            }
+
+            // --- 判定 ---
             if (isRunning && !isHit) {
+                const headTop_m = pH;
+                const eraserBottom_m = eraserY_m;
                 const status = document.getElementById('status');
-                if (currentX >= targetX - 20 && currentX <= targetX + 20) {
-                    if (eraserBottom >= headTop && eraserY <= headY) {
+
+                if (t >= rT) {
+                    if (eraserBottom_m <= headTop_m && eraserBottom_m > 0) {
                         status.innerText = "💥 ヒット！";
                         status.style.color = "#d32f2f";
                         isHit = true;
                         return false;
+                    } else if (eraserBottom_m > headTop_m) {
+                        status.innerText = "🏃 回避成功！（まだ上にあった）";
+                        status.style.color = "#388e3c";
+                        return false;
+                    } else {
+                        status.innerText = "⌛ 回避成功！（先に落ちた）";
+                        status.style.color = "#757575";
+                        return false;
                     }
                 }
-                if (currentX >= targetX && eraserY >= groundY - 10) {
-                    status.innerText = "🏃 回避成功！";
-                    status.style.color = "#388e3c";
-                    return false;
-                }
             }
-            return !isHit; 
+            return !isHit;
         }
 
         function startSimulation() {
             cancelAnimationFrame(animationId);
             const dH = parseFloat(document.getElementById('doorHeight').value);
             const pH = parseFloat(document.getElementById('personHeight').value);
-            const gapW = parseFloat(document.getElementById('gapWidth').value);
-            const dSpeed = parseFloat(document.getElementById('doorSpeed').value);
-            const wTime = parseFloat(document.getElementById('walkTime').value);
+            const rT = parseFloat(document.getElementById('reachTime').value);
             const g = parseFloat(document.getElementById('g').value);
             
             isHit = false;
+            history = [];
             document.getElementById('status').innerText = "実行中...";
-            document.getElementById('status').style.color = "#333";
             startTime = performance.now();
             
             function animate() {
                 const now = performance.now();
                 const t = (now - startTime) / 1000;
-                const continueAnim = draw(t, dH, pH, gapW, dSpeed, wTime, g, true);
-                if (continueAnim && t < 5.0) {
+                const continueAnim = draw(t, dH, pH, rT, g, true);
+                if (continueAnim && t < rT + 1) {
                     animationId = requestAnimationFrame(animate);
                 }
             }
             animate();
         }
 
-        personImg.onload = () => draw(0, 2.0, 1.7, 0.6, 1.2, 0.5, 9.8, false);
-        window.onload = () => draw(0, 2.0, 1.7, 0.6, 1.2, 0.5, 9.8, false);
+        window.onload = () => draw(0, 2.0, 1.7, 1.0, 9.8, false);
     </script>
 </body>
 </html>
