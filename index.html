@@ -3,12 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex, nofollow">
-    <title>物理基礎：黒板消し落とし V10</title>
+    <title>物理基礎：黒板消し落とし V13（タイミング探究版）</title>
     <style>
         body { font-family: 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; background: #eceff1; color: #333; margin: 0; padding: 20px; }
         .container { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 640px; }
         
-        /* 上部アニメーションとボタンの横並びレイアウト */
         .sim-layout { display: flex; gap: 10px; margin-bottom: 10px; align-items: flex-end; }
         #simCanvas { background: #fafafa; border: 1px solid #cfd8dc; border-radius: 4px; }
         .side-panel { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 300px; }
@@ -25,7 +24,7 @@
             font-weight: bold; 
             transition: 0.3s;
             box-shadow: 0 4px 6px rgba(33, 150, 243, 0.3);
-            margin-bottom: 5px; /* グラフのすぐ上に配置 */
+            margin-bottom: 5px; 
         }
         .start-btn:hover { background: #1976d2; transform: translateY(-2px); }
         .start-btn:active { transform: translateY(0); }
@@ -35,7 +34,9 @@
         .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
         .control-group { display: flex; flex-direction: column; }
         label { font-size: 13px; font-weight: bold; margin-bottom: 5px; color: #455a64; }
-        input { padding: 8px; border: 1px solid #cfd8dc; border-radius: 4px; }
+        /* 入力ボックスを少し大きく、目立たせる */
+        input { padding: 10px; border: 2px solid #cfd8dc; border-radius: 4px; font-size: 16px; font-weight: bold; }
+        input:focus { outline: none; border-color: #2196f3; }
         
         .result-box { grid-column: span 2; text-align: center; height: 30px; line-height: 30px; font-weight: bold; font-size: 18px; border-radius: 4px; }
         .info { grid-column: span 2; font-size: 12px; color: #666; background: #f5f5f5; padding: 10px; border-radius: 4px; line-height: 1.5; }
@@ -48,7 +49,6 @@
         
         <div class="sim-layout">
             <canvas id="simCanvas" width="460" height="300"></canvas>
-            
             <div class="side-panel">
                 <div id="status" class="result-box"></div>
                 <button class="start-btn" onclick="startSimulation()">シミュレーション<br>開始</button>
@@ -67,16 +67,16 @@
                 <input type="number" id="personHeight" value="1.7" step="0.1">
             </div>
             <div class="control-group">
-                <label>ドア下までの到達時間 (s)</label>
-                <input type="number" id="reachTime" value="1.0" step="0.05">
+                <label>ドア下までの到達時間 (s) ※直接入力可</label>
+                <input type="number" id="reachTime" value="0.25" step="0.01">
             </div>
             <div class="control-group">
                 <label>重力加速度 (m/s²)</label>
                 <input type="number" id="g" value="9.8" step="0.1">
             </div>
             <div class="info">
-                <strong>時間配分：</strong>到達時間の80%でドアを開け、残り20%で移動します。<br>
-                <strong>グラフ：</strong>青＝黒板消し高さ、オレンジ＝人の位置（目盛りは自動調整）
+                <strong>探究課題：</strong>到達時間を0.01秒刻みで調整し、「頭（上部10cmの範囲）」にジャストミートする時間を計算して入力してみよう。<br>
+                <strong>判定：</strong>頂点〜10cmを「頭」、10cm〜30cmを「顔」、それ以下を「体」とします。
             </div>
         </div>
     </div>
@@ -125,30 +125,25 @@
 
             sCtx.clearRect(0, 0, simCanvas.width, simCanvas.height);
             
-            // オートスケール計算
             const maxDrawHeight = simCanvas.height - 40; 
             const scale = maxDrawHeight / Math.max(dH, 2.0);
             const groundY = simCanvas.height - 20;
-            const doorX = 320; // ドア位置を左に寄せる
+            const doorX = 320; 
             const doorTopY = groundY - dH * scale;
 
-            // 壁と鴨居
             sCtx.fillStyle = '#e0e0e0';
             sCtx.fillRect(doorX - 150, doorTopY, 150, dH * scale);
             sCtx.fillStyle = '#8d6e63';
             sCtx.fillRect(doorX - 150, doorTopY - 10, 300, 10);
 
-            // ドア
             let slide = isRunning ? Math.min(t / waitTime, 1) * 80 : 0; 
             sCtx.fillStyle = '#b0bec5';
             sCtx.fillRect(doorX + slide, doorTopY, 110, dH * scale);
 
-            // 黒板消し
             const eY = groundY - eraserY_m * scale;
             sCtx.fillStyle = '#4e342e';
             sCtx.fillRect(doorX - 10, eY - 12, 30, 12);
 
-            // 人（正確な比率で描画）
             const startX = doorX - 60; 
             const targetX = doorX + 5;
             const currentX = startX + (targetX - startX) * personX_ratio;
@@ -167,7 +162,6 @@
                 sCtx.fillRect(currentX - 10, groundY - pHeightPx, 20, pHeightPx);
             }
 
-            // --- グラフ描画 ---
             gCtx.clearRect(0, 0, graphCanvas.width, graphCanvas.height);
             const padL = 50, padR = 20, padT = 20, padB = 40;
             const gW = graphCanvas.width - padL - padR;
@@ -181,7 +175,6 @@
             gCtx.fillStyle = "#666";
             gCtx.strokeStyle = "#eee";
             
-            // 目盛りとグリッド
             gCtx.textAlign = "right";
             for (let yv = 0; yv <= yMax; yv += yStep) {
                 const py = padT + gH - (yv / yMax) * gH;
@@ -195,33 +188,47 @@
                 gCtx.fillText(xv.toFixed(1), px, padT + gH + 15);
             }
 
-            // 軸
             gCtx.strokeStyle = '#90a4ae';
             gCtx.strokeRect(padL, padT, gW, gH);
 
             if (history.length > 1) {
                 const getX = (time) => padL + (time / xMax) * gW;
                 const getY = (val) => padT + gH - (val / yMax) * gH;
-                // 黒板消し(青)
+                
                 gCtx.strokeStyle = '#2196f3'; gCtx.lineWidth = 2; gCtx.beginPath();
                 history.forEach((pt, i) => { if(i===0) gCtx.moveTo(getX(pt.t), getY(pt.eraserY)); else gCtx.lineTo(getX(pt.t), getY(pt.eraserY)); });
                 gCtx.stroke();
-                // 人(オレンジ)
+                
                 gCtx.strokeStyle = '#ff9800'; gCtx.beginPath();
                 history.forEach((pt, i) => { if(i===0) gCtx.moveTo(getX(pt.t), getY(pt.personX * dH)); else gCtx.lineTo(getX(pt.t), getY(pt.personX * dH)); });
                 gCtx.stroke();
             }
 
-            // 判定処理
+            // --- 頭・顔・体の詳細判定処理 ---
             if (isRunning && !isHit) {
                 const status = document.getElementById('status');
+                const headBottom = pH - 0.1; // 上から10cmまでを「頭」
+                const faceBottom = pH - 0.3; // 頭の下から20cmを「顔」
+
                 if (t >= rT) {
-                    if (eraserY_m <= pH && eraserY_m > 0) {
-                        status.innerText = "💥 ヒット！"; status.style.color = "#d32f2f"; isHit = true; return false;
+                    if (eraserY_m <= pH && eraserY_m > headBottom) {
+                        status.innerText = "🎯 頭に直撃！"; 
+                        status.style.color = "#d32f2f"; 
+                        isHit = true; return false;
+                    } else if (eraserY_m <= headBottom && eraserY_m > faceBottom) {
+                        status.innerText = "💥 顔に命中！"; 
+                        status.style.color = "#f57c00"; 
+                        isHit = true; return false;
+                    } else if (eraserY_m <= faceBottom && eraserY_m > 0) {
+                        status.innerText = "💥 体に命中！"; 
+                        status.style.color = "#795548"; 
+                        isHit = true; return false;
                     } else if (eraserY_m > pH) {
-                        status.innerText = "🏃 回避成功！（上）"; status.style.color = "#388e3c"; return false;
+                        status.innerText = "🏃 回避成功！（上）"; 
+                        status.style.color = "#388e3c"; return false;
                     } else {
-                        status.innerText = "⌛ 回避成功！（落）"; status.style.color = "#757575"; return false;
+                        status.innerText = "⌛ 回避成功！（落）"; 
+                        status.style.color = "#757575"; return false;
                     }
                 }
             }
@@ -246,8 +253,8 @@
             animate();
         }
 
-        personImg.onload = () => draw(0, 2.0, 1.7, 1.0, 9.8, false);
-        window.onload = () => draw(0, 2.0, 1.7, 1.0, 9.8, false);
+        personImg.onload = () => draw(0, 2.0, 1.7, 0.25, 9.8, false);
+        window.onload = () => draw(0, 2.0, 1.7, 0.25, 9.8, false);
     </script>
 </body>
 </html>
