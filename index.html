@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="robots" content="noindex, nofollow">
-    <title>物理基礎：黒板消し落とし V7（グラフ・時間差モデル）</title>
+    <title>物理基礎：黒板消し落とし V8</title>
     <style>
         body { font-family: 'Helvetica Neue', Arial, sans-serif; display: flex; flex-direction: column; align-items: center; background: #eceff1; color: #333; margin: 0; padding: 20px; }
         .container { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 640px; }
@@ -46,8 +46,8 @@
             <button onclick="startSimulation()">シミュレーション実行</button>
             <div id="status" class="result-box"></div>
             <div class="info">
-                <strong>時間配分：</strong>入力した到達時間の80%は待機（ドアを開ける動作）、残りの20%でドア下まで移動します。<br>
-                <strong>グラフ：</strong>青＝黒板消しの高さ(m)、オレンジ＝人の移動距離(m)
+                <strong>時間配分：</strong>入力した到達時間の80%をかけてドアを開け、残りの20%でドア下まで一気に踏み込みます。<br>
+                <strong>グラフ：</strong>青＝黒板消しの高さ(m)、オレンジ＝人の移動比率
             </div>
         </div>
     </div>
@@ -75,7 +75,7 @@
             let eraserY_m = dH - 0.5 * g * Math.pow(t, 2);
             if (eraserY_m < 0) eraserY_m = 0;
 
-            // 人の水平位置 (0.8rTまで待機、その後移動)
+            // 人の水平位置 (waitTimeまで待機、その後移動)
             let personX_ratio = 0;
             if (t > waitTime) {
                 personX_ratio = Math.min((t - waitTime) / moveTime, 1.0);
@@ -93,14 +93,18 @@
             const doorX = 400;
             const doorTopY = groundY - dH * scale;
 
-            // 背景
+            // 背景（左側の壁と上部の鴨居）
             sCtx.fillStyle = '#e0e0e0';
             sCtx.fillRect(doorX - 150, doorTopY, 150, dH * scale);
             sCtx.fillStyle = '#8d6e63';
             sCtx.fillRect(doorX - 150, doorTopY - 10, 300, 10);
 
-            // ドア
-            let slide = isRunning ? Math.min(t / 0.2, 1) * 80 : 0;
+            // ドア（待機時間に合わせて徐々に開く）
+            let slide = 0;
+            if (isRunning) {
+                // waitTimeの間に90px分スライドして開く
+                slide = Math.min(t / waitTime, 1) * 90; 
+            }
             sCtx.fillStyle = '#b0bec5';
             sCtx.fillRect(doorX + slide, doorTopY, 120, dH * scale);
 
@@ -109,21 +113,29 @@
             sCtx.fillStyle = '#4e342e';
             sCtx.fillRect(doorX - 10, eY - 12, 30, 12);
 
-            // 人
-            const startX = 100;
+            // 人の座標計算（ドアのすぐ左からスタート）
+            const startX = doorX - 60; 
             const targetX = doorX + 5;
             const currentX = startX + (targetX - startX) * personX_ratio;
-            const pHeightPx = pH * scale;
+            const pHeightPx = pH * scale; // 身長に基づくピクセル高
 
+            // 人の描画
             if (personImg.complete && personImg.naturalWidth !== 0) {
+                // 画像の本来の縦横比を取得して、伸び縮みさせない
+                const aspect = personImg.naturalWidth / personImg.naturalHeight;
+                const pWidthPx = pHeightPx * aspect; 
+
                 sCtx.save();
                 sCtx.translate(currentX, groundY - pHeightPx);
                 sCtx.scale(-1, 1);
-                sCtx.drawImage(personImg, -40, 0, 80, pHeightPx);
+                // 中央揃えで描画
+                sCtx.drawImage(personImg, -pWidthPx / 2, 0, pWidthPx, pHeightPx);
                 sCtx.restore();
             } else {
+                // 画像がない場合の代替図形
+                const defaultWidth = pHeightPx * 0.35;
                 sCtx.fillStyle = '#1976d2';
-                sCtx.fillRect(currentX - 15, groundY - pHeightPx, 30, pHeightPx);
+                sCtx.fillRect(currentX - defaultWidth / 2, groundY - pHeightPx, defaultWidth, pHeightPx);
             }
 
             // --- グラフ描画 ---
@@ -138,7 +150,7 @@
                 const gScaleX = 500 / Math.max(rT + 0.5, 2);
                 const gScaleY = 140 / Math.max(dH, 2);
 
-                // 黒板消しライン
+                // 黒板消しライン（青）
                 gCtx.strokeStyle = '#2196f3';
                 gCtx.lineWidth = 2;
                 gCtx.beginPath();
@@ -149,12 +161,12 @@
                 });
                 gCtx.stroke();
 
-                // 人のライン
+                // 人のライン（オレンジ）
                 gCtx.strokeStyle = '#ff9800';
                 gCtx.beginPath();
                 history.forEach((pt, i) => {
                     const x = 40 + pt.t * gScaleX;
-                    const y = 180 - (pt.personX * dH) * gScaleY; // 比率を高さに換算して表示
+                    const y = 180 - (pt.personX * dH) * gScaleY; // 進行度を高さに換算
                     if (i === 0) gCtx.moveTo(x, y); else gCtx.lineTo(x, y);
                 });
                 gCtx.stroke();
@@ -196,6 +208,7 @@
             isHit = false;
             history = [];
             document.getElementById('status').innerText = "実行中...";
+            document.getElementById('status').style.color = "#333";
             startTime = performance.now();
             
             function animate() {
@@ -209,6 +222,8 @@
             animate();
         }
 
+        // 初期表示（画像読み込み完了時に再描画）
+        personImg.onload = () => draw(0, 2.0, 1.7, 1.0, 9.8, false);
         window.onload = () => draw(0, 2.0, 1.7, 1.0, 9.8, false);
     </script>
 </body>
